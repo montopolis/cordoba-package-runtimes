@@ -1,0 +1,81 @@
+name: Build
+
+# Builds the package runtime images and pushes them to GHCR.
+#
+# The package is public so neither the server nor package authors need pull
+# credentials; the images hold pinned libraries and no secrets. Visibility is a
+# one-off setting on the GHCR package page - this workflow cannot change it.
+#
+# Jobs run an image by digest, never by tag. After a run, set the digest it
+# prints as the runtime's image in Cordoba (PACKAGES_RUNTIME_PYTHON_V1_IMAGE).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'python-v*/**'
+      - '.github/workflows/build.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.runtime }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [ python-v1 ]
+    env:
+      IMAGE: ghcr.io/montopolis/cordoba-package-runtime
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # arm64 is built too so authors on Apple Silicon run the same digest.
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.runtime }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ matrix.runtime }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.description=Cordoba package runtime ${{ matrix.runtime }}
+
+      - name: Print digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          RUNTIME: ${{ matrix.runtime }}
+        run: |
+          echo "${RUNTIME}: ${IMAGE}@${DIGEST}"
+          {
+            echo "### ${RUNTIME}"
+            echo
+            echo "Set this as the runtime's image in Cordoba:"
+            echo
+            echo '```'
+            echo "${IMAGE}@${DIGEST}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

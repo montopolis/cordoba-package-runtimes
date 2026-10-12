@@ -1,0 +1,6 @@
+# Direct dependencies of the python-v1 package runtime. Regenerate the pinned,
+# hashed requirements.txt after editing (see README.md).
+openpyxl
+pypdf
+pypdfium2
+reportlab
